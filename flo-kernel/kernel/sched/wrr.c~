@@ -1,0 +1,76 @@
+#include "sched.h"
+
+#include <linux/slab.h>
+
+void init_wrr_rq(struct wrr_rq *wrr_rq)
+{
+	INIT_LIST_HEAD(&wrr_rq->list);
+	wrr_rq->rq_weight = 0;
+	wrr_rq->wrr_nr_running = 0;
+}
+
+
+
+static void enqueue_task_wrr(struct rq *rq, struct task_struct *p, int flags)
+{
+	struct sched_wrr_entity *wrr_se = &(p->wrr);
+
+	if (flags & ENQUEUE_WAKEUP)
+		wrr_se->timeout = 0;
+
+	enqueue_wrr_entity(rq, wrr_se, flags & ENQUEUE_HEAD);
+	inc_nr_running(rq);
+}
+
+static void dequeue_task_wrr(struct rq *rq, struct task_struct *p, int flags)
+{
+	struct sched_wrr_entity *wrr_se = &p->wrr;
+
+	update_curr_wrr(rq);
+	dequeue_wrr_entity(wrr_se);
+	dec_nr_running(rq);
+}
+
+static void update_curr_grr(struct rq *rq)
+{
+	struct task_struct *curr = rq->curr;
+	u64 delta_exec;
+
+	if (curr->sched_class != &grr_sched_class)
+		return;
+
+	delta_exec = rq->clock_task - curr->se.exec_start;
+	if (unlikely((s64)delta_exec < 0))
+		delta_exec = 0;
+
+	schedstat_set(curr->se.statistics.exec_max,
+		      max(curr->se.statistics.exec_max, delta_exec));
+
+	 curr->se.sum_exec_runtime += delta_exec;
+	 account_group_exec_runtime(curr, delta_exec);
+
+	 curr->se.exec_start = rq->clock_task;
+	 cpuacct_charge(curr, delta_exec);
+}
+
+const struct sched_class wrr_sched_class = {
+	.next			= &fair_sched_class,
+	.enqueue_task		= enqueue_task_wrr,
+	.dequeue_task		= dequeue_task_wrr,
+	.yield_task		= yield_task_wrr,
+	.check_preempt_curr	= check_preempt_curr_wrr,
+	.pick_next_task		= pick_next_task_wrr,
+	.put_prev_task		= put_prev_task_wrr,
+
+#ifdef CONFIG_SMP
+	.select_task_rq		= select_task_rq_wrr,
+#endif
+	.set_curr_task          = set_curr_task_wrr,
+	.task_tick		= task_tick_wrr,
+	.prio_changed		= prio_changed_wrr,
+	.switched_to		= switched_to_wrr,
+	.get_rr_interval	= get_rr_interval_wrr,
+};
+
+
+
